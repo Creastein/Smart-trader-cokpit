@@ -1,10 +1,11 @@
 import React, { useCallback, useState, useEffect } from 'react';
 import Image from 'next/image';
-import { Upload, X, Image as ImageIcon, Info } from 'lucide-react';
+import { Upload, X, Image as ImageIcon, Info, Loader2 } from 'lucide-react';
 import { twMerge } from 'tailwind-merge';
+import { compressImage } from '@/utils/imageCompression';
 
 // File validation constants
-const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
+const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB (Client limit before compression)
 const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
 
 interface UploadZoneProps {
@@ -41,6 +42,7 @@ const SingleDropZone = ({
 }: SingleDropZoneProps) => {
     const [isDragOver, setIsDragOver] = useState(false);
     const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+    const [isCompressing, setIsCompressing] = useState(false);
 
     useEffect(() => {
         if (file) {
@@ -53,8 +55,11 @@ const SingleDropZone = ({
     }, [file]);
 
     const validateFile = (file: File): string | null => {
+        // Validation moved to after compression? Or check initial size relative to limit?
+        // Actually we compress regardless, but if it is HUGE (>20MB) maybe block?
+        // Let's stick to 20MB limit for raw input to save browser memory
         if (file.size > MAX_FILE_SIZE) {
-            return `File terlalu besar. Maksimal ukuran adalah ${MAX_FILE_SIZE / 1024 / 1024}MB.`;
+            return `File terlalu besar (Maks 20MB).`;
         }
         if (!ALLOWED_IMAGE_TYPES.includes(file.type)) {
             return `Tipe file tidak didukung. Gunakan: JPEG, PNG, GIF, WebP.`;
@@ -62,10 +67,29 @@ const SingleDropZone = ({
         return null;
     };
 
+    const handleFileProcess = useCallback(async (rawFile: File) => {
+        const validationError = validateFile(rawFile);
+        if (validationError) {
+            onError?.(validationError);
+            return;
+        }
+
+        setIsCompressing(true);
+        try {
+            const compressedFile = await compressImage(rawFile);
+            onFileSelect(compressedFile);
+        } catch (error) {
+            console.error("Compression failed:", error);
+            onError?.("Gagal memproses gambar. Coba file lain.");
+        } finally {
+            setIsCompressing(false);
+        }
+    }, [onFileSelect, onError]);
+
     const handleDragOver = useCallback((e: React.DragEvent) => {
         e.preventDefault();
-        if (!disabled) setIsDragOver(true);
-    }, [disabled]);
+        if (!disabled && !isCompressing) setIsDragOver(true);
+    }, [disabled, isCompressing]);
 
     const handleDragLeave = useCallback((e: React.DragEvent) => {
         e.preventDefault();
@@ -75,31 +99,19 @@ const SingleDropZone = ({
     const handleDrop = useCallback((e: React.DragEvent) => {
         e.preventDefault();
         setIsDragOver(false);
-        if (disabled) return;
+        if (disabled || isCompressing) return;
 
         if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-            const uploadedFile = e.dataTransfer.files[0];
-            const validationError = validateFile(uploadedFile);
-            if (validationError) {
-                onError?.(validationError);
-                return;
-            }
-            onFileSelect(uploadedFile);
+            handleFileProcess(e.dataTransfer.files[0]);
         }
-    }, [disabled, onFileSelect, onError]);
+    }, [disabled, isCompressing, handleFileProcess]);
 
     const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files && e.target.files[0]) {
-            const uploadedFile = e.target.files[0];
-            const validationError = validateFile(uploadedFile);
-            if (validationError) {
-                onError?.(validationError);
-                e.target.value = '';
-                return;
-            }
-            onFileSelect(uploadedFile);
+            handleFileProcess(e.target.files[0]);
+            e.target.value = ''; // Reset input
         }
-    }, [onFileSelect, onError]);
+    }, [handleFileProcess]);
 
     if (file && previewUrl) {
         return (
@@ -159,13 +171,20 @@ const SingleDropZone = ({
             />
             <label htmlFor={`upload-${id}`} className={twMerge("cursor-pointer block w-full h-full flex flex-col items-center justify-center", disabled && "cursor-not-allowed")}>
                 <div className={twMerge(
-                    "p-3 rounded-full bg-slate-800 mb-3",
-                    isDragOver ? "text-blue-500" : "text-slate-400"
+                    "p-3 rounded-full bg-slate-800 mb-3 transition-all",
+                    isDragOver ? "text-blue-500 scale-110" : "text-slate-400",
+                    isCompressing && "animate-pulse"
                 )}>
-                    <Upload className="w-6 h-6" />
+                    {isCompressing ? (
+                        <Loader2 className="w-6 h-6 animate-spin text-blue-400" />
+                    ) : (
+                        <Upload className="w-6 h-6" />
+                    )}
                 </div>
                 <div className="text-slate-300">
-                    <span className="font-bold text-sm block mb-1">{label}</span>
+                    <span className="font-bold text-sm block mb-1">
+                        {isCompressing ? "Mengompres Gambar..." : label}
+                    </span>
                     <span className="text-xs text-slate-500 block">{subLabel}</span>
                     {!required && <span className="text-[10px] text-slate-600 mt-2 bg-slate-800/50 px-2 py-0.5 rounded-full inline-block">OPTIONAL</span>}
                 </div>
