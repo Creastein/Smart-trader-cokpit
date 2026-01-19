@@ -279,8 +279,9 @@ export async function POST(req: Request) {
 
     } catch (error) {
         logger.error("Analysis Error:", error);
+        const errorMessage = error instanceof Error ? error.message : String(error);
         return NextResponse.json(
-            { error: "Internal server error." },
+            { error: `Server Error: ${errorMessage}` },
             { status: 500 }
         );
     }
