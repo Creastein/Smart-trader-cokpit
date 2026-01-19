@@ -116,11 +116,23 @@ export default function Home() {
                 body: formData,
             });
 
-            if (!response.ok) {
-                throw new Error(`Analysis failed: ${response.statusText}`);
+            // Try to parse JSON regardless of status to check for custom error messages
+            let data;
+            try {
+                data = await response.json();
+            } catch (jsonError) {
+                // If JSON parse fails, it might be a raw server error (timeout/gateway)
+                console.error("JSON parse failed", jsonError);
             }
 
-            const data = await response.json();
+            if (!response.ok) {
+                // Use the error message from server if available, otherwise fallback to status text
+                const errorMessage = data?.error || `Analysis failed (${response.status}): ${response.statusText}`;
+                throw new Error(errorMessage);
+            }
+
+            // data is already parsed above
+
 
             if (data.error) {
                 throw new Error(data.error);
